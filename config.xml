@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module>
+  <name><![CDATA[ticketsystem]]></name>
+  <displayName><![CDATA[Ticket System Module]]></displayName>
+  <version><![CDATA[1.0]]></version>
+  <description><![CDATA[This module adds handling of Ticket system module and replaces the Customer service core]]></description>
+  <author><![CDATA[Groot]]></author>
+  <author_uri/>
+  <tab><![CDATA[front_office_features]]></tab>
+  <confirmUninstall/>
+  <is_configurable>0</is_configurable>
+  <need_instance>0</need_instance>
+  <limited_countries/>
+</module>
