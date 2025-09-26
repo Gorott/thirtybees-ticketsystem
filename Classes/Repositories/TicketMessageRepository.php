@@ -42,6 +42,7 @@ class TicketMessageRepository
         }
         $ticketMessage->author_type = $author->value;
 
+
         $ticketMessage->created_at = date("Y-m-d H:i:s");
 
         $ticket->last_updated = $ticketMessage->created_at;

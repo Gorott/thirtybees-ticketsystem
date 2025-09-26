@@ -55,4 +55,9 @@ $(function () {
             $textArea.val((current ? current + "\n" : "") + selection);
         }
     });
+
+    $(document).ready(function () {
+        fetchSuggestion('');
+    });
+
 })

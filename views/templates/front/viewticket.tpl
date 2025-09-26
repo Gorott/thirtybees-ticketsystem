@@ -1,3 +1,5 @@
+{hook h='displayHeader'}
+
 {if isset($errors) && $errors}
     <div class="alert alert-danger">
         <ul>

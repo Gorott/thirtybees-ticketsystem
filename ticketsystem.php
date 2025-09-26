@@ -2,28 +2,25 @@
 
 
 use TicketSystem\Enums\MessageAuthor;
+use TicketSystem\Models\Ticket;
 use TicketSystem\Repositories\TicketCategoryRepository;
 use TicketSystem\Repositories\TicketMessageRepository;
 use TicketSystem\Repositories\TicketStatusRepository;
 use TicketSystem\Services\TicketService;
+use TicketSystem\Services\TicketSyncHelper;
 
 if (!defined('_TB_VERSION_')) {
     exit;
 }
 
-require_once __DIR__.'/vendor/autoload.php';
+require_once __DIR__ . '/vendor/autoload.php';
+
 final class TicketSystem extends ModuleCore
 {
-    private readonly TicketStatusRepository $ticketStatusRepository;
-    private readonly TicketCategoryRepository $ticketCategoryRepository;
 
-    public function __construct(
-        private readonly TicketService $ticketService,
-        private readonly TicketMessageRepository $ticketMessageRepository,
-    )
+    public function __construct(private readonly TicketStatusRepository $ticketStatusRepository, private readonly TicketCategoryRepository $ticketCategoryRepository, private readonly TicketSyncHelper $ticketSyncHelper)
     {
-        $this->ticketStatusRepository = new TicketStatusRepository();
-        $this->ticketCategoryRepository = new TicketCategoryRepository();
+
 
         $this->name = 'ticketsystem';
         $this->tab = 'front_office_features';
@@ -36,7 +33,7 @@ final class TicketSystem extends ModuleCore
         parent::__construct();
 
 
-        $this->context->smarty->addPluginsDir(__DIR__.'/smarty/plugins');
+        $this->context->smarty->addPluginsDir(__DIR__ . '/smarty/plugins');
 
         $this->displayName = 'Ticket System Module';
         $this->description = 'This module adds handling of Ticket system module and replaces the Customer service core';
@@ -45,18 +42,17 @@ final class TicketSystem extends ModuleCore
 
     public function install(): bool
     {
-        if (
-            !parent::install() ||
-            !self::createTicketStatusTable() ||
-            !self::createTicketCategoryTable() ||
-            !self::createTicketTable() ||
-            !self::createTicketMessageTable() ||
-            !self::createTicketThreadMapTable()
-        ) {
+        if (!parent::install() || !self::createTicketStatusTable() || !self::createTicketCategoryTable() || !self::createTicketTable() || !self::createTicketMessageTable() || !self::createTicketThreadMapTable() || !self::createTicketMessageMapTable()) {
             return false;
         }
 
-        if (!(int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `'._DB_PREFIX_.'ticket_status`')) {
+        $defaultPromptPath = __DIR__ . '/prompts/default_prompt.txt';
+        if (file_exists($defaultPromptPath)) {
+            $defaultPrompt = file_get_contents($defaultPromptPath);
+            Configuration::updateValue('AI_SUGGESTION_DEFAULT_PROMPT', $defaultPrompt);
+        }
+
+        if (!(int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'ticket_status`')) {
             $ticketStatus = $this->ticketStatusRepository->create("On Hold", '#BF0F0F');
             $this->ticketStatusRepository->create("Open", '#13ED3A');
             $this->ticketStatusRepository->create("Closed", '#7D7D7D');
@@ -65,7 +61,7 @@ final class TicketSystem extends ModuleCore
         }
 
 
-        if (!(int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `'._DB_PREFIX_.'ticket_category`')) {
+        if (!(int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'ticket_category`')) {
             $ticketCategory = $this->ticketCategoryRepository->create("Customer Service", 'All Questions');
             Configuration::updateGlobalValue('DEFAULT_TICKET_CATEGORY', $ticketCategory->id);
         }
@@ -131,8 +127,20 @@ final class TicketSystem extends ModuleCore
             $tab->add();
         }
 
+        $id_tab = (int) Tab::getIdFromClassName('AdminCustomerThreads');
+        if ($id_tab) {
+            $tab = new Tab($id_tab);
+            $tab->delete();
+        }
 
-        if (!$this->registerHook('displayCustomerAccount')) {
+        if (!$this->registerHook('displayCustomerAccount') ||
+            !$this->registerHook('actionObjectCustomerThreadDeleteAfter') ||
+            !$this->registerHook('actionEmailSend') ||
+            !$this->registerHook('displayBackOfficeHeader') ||
+            !$this->registerHook('actionAdminCustomersView') ||
+            !$this->registerHook('displayBackOfficeFooter') ||
+            !$this->registerHook('moduleRoutes')
+        ) {
             return false;
         }
 
@@ -142,10 +150,16 @@ final class TicketSystem extends ModuleCore
     public function uninstall(): bool
     {
         if (!parent::uninstall() ||
-            !$this->unregisterHook('displayCustomerAccount')
-        ) {
-            return false;
-        }
+            !$this->unregisterHook('displayCustomerAccount') ||
+            !$this->unregisterHook('actionObjectCustomerThreadDeleteAfter') ||
+            !$this->unregisterHook('actionEmailSend') ||
+            !$this->unregisterHook('displayBackOfficeHeader') ||
+            !$this->unregisterHook('actionAdminCustomersView') ||
+            !$this->unregisterHook('displayBackOfficeFooter') ||
+            !$this->unregisterHook('moduleRoutes')
+            ) {
+                return false;
+            }
 
         $id_tab = (int) Tab::getIdFromClassName('AdminTicketSystem');
         while (!$id_tab) {
@@ -170,9 +184,124 @@ final class TicketSystem extends ModuleCore
             $tab = new Tab($id_tab);
             $tab->delete();
         }
+
+        $idTab = (int) Tab::getIdFromClassName('AdminCustomerThreads');
+        if (!$idTab) {
+            $tab = new Tab();
+            $tab->active = 1;
+            $tab->class_name = 'AdminCustomerThreads';
+            $tab->module = null; // core tab, no module
+            $tab->id_parent = (int) Tab::getIdFromClassName('AdminParentCustomer');
+
+            foreach (Language::getLanguages(true) as $lang) {
+                $tab->name[$lang['id_lang']] = 'Customer Service';
+            }
+
+            $tab->add();
+        }
+
         return true;
     }
 
+
+    public function hookDisplayCustomerAccount()
+    {
+        return $this->context->smarty->fetch(_PS_MODULE_DIR_ . $this->name . '/views/templates/hook/myaccount.tpl');
+    }
+
+    public function hookActionObjectCustomerThreadDeleteAfter(array $params): void
+    {
+        /** @var \CustomerThread $customerThread */
+        $customerThread = $params['object'];
+
+        if (!\Validate::isLoadedObject($customerThread)) {
+            return;
+        }
+
+        $this->ticketSyncHelper->deleteThread($customerThread);
+    }
+
+    public function hookActionEmailSend($params)
+    {
+        $blockedTemplates = ['contact', 'reply_msg'];
+
+        if (!empty($params['template']) && !in_array($params['template'], $blockedTemplates)) {
+            return false;
+        }
+    }
+
+    public function hookDisplayBackOfficeHeader($params)
+    {
+        if (isset($this->context->controller) && $this->context->controller->controller_type === 'admin') {
+            $this->context->controller->addCSS($this->_path.'views/css/admin.css');
+        }
+    }
+
+    public function hookDisplayBackOfficeFooter($params)
+    {
+        // Only inject on the AdminCustomers controller
+        if (
+            !$this->context->controller instanceof AdminCustomersController &&
+            !$this->context->controller instanceof AdminOrdersController
+        ) {
+            return '';
+        }
+
+        $id_customer = (int) Tools::getValue('id_customer');
+        $id_order = (int) Tools::getValue('id_order');
+        $tickets = [];
+        if ($id_customer) {
+            $tickets = $this->getTicketsByCustomer($id_customer);
+        } elseif ($id_order) {
+            $tickets = $this->getTicketsByOrder($id_order);
+        }
+
+        $this->context->smarty->assign(['tickets' => $tickets]);
+
+        return $this->display(__FILE__, 'views/templates/admin/tickets_wrapper.tpl');
+    }
+
+    public function hookModuleRoutes($params)
+    {
+        return [
+            'module-ticketsystem-contact' => [
+                'controller' => 'contact',
+                'rule'       => 'contact-us',
+                'keywords'   => [],
+                'params'     => [
+                    'fc'     => 'module',
+                    'module' => 'ticketsystem',
+                    'controller' => 'contact',
+                ],
+            ],
+        ];
+    }
+
+
+
+    private function getTicketsByCustomer(int $idCustomer): array
+    {
+        $rows = Db::getInstance()->executeS('
+        SELECT id_ticket
+        FROM `'._DB_PREFIX_.'ticket`
+        WHERE id_customer = '.(int) $idCustomer.'
+        ORDER BY last_updated DESC
+    ');
+
+        return array_map(fn($row) => new Ticket((int) $row['id_ticket']), $rows);
+    }
+
+    private function getTicketsByOrder(int $idOrder): array
+    {
+        $rows = Db::getInstance()->executeS('
+        SELECT id_ticket
+        FROM `'._DB_PREFIX_.'ticket`
+        WHERE id_order = '.(int) $idOrder.'
+        ORDER BY last_updated DESC
+    ');
+
+        return array_map(fn($row) => new Ticket((int) $row['id_ticket']), $rows);
+    }
 
     private static function createTicketTable(): bool
     {
@@ -183,14 +312,16 @@ final class TicketSystem extends ModuleCore
         `subject` VARCHAR(255) NOT NULL,
         `id_status` INT(11) UNSIGNED NOT NULL,
         `id_category` INT(11) UNSIGNED NOT NULL,
-        `created_at` DATETIME NOT NULL,
+        `id_order` INT(11) UNSIGNED DEFAULT NULL,
         `id_assignee` INT(11) UNSIGNED DEFAULT NULL,
         `last_updated` DATETIME NOT NULL,
+                `created_at` DATETIME NOT NULL,
         PRIMARY KEY (`id_ticket`),
         KEY `id_customer` (`id_customer`),
         KEY `id_status` (`id_status`),
         KEY `id_category` (`id_category`),
         KEY `id_assignee` (`id_assignee`),
+        KEY `id_order` (`id_order`),
         CONSTRAINT `fk_ticket_customer` FOREIGN KEY (`id_customer`)
             REFERENCES `' . _DB_PREFIX_ . 'customer` (`id_customer`) ON DELETE CASCADE,
         CONSTRAINT `fk_ticket_assignee` FOREIGN KEY (`id_assignee`)
@@ -198,7 +329,9 @@ final class TicketSystem extends ModuleCore
         CONSTRAINT `fk_ticket_status` FOREIGN KEY (`id_status`)
             REFERENCES `' . _DB_PREFIX_ . 'ticket_status` (`id_ticket_status`) ON DELETE RESTRICT,
         CONSTRAINT `fk_ticket_category` FOREIGN KEY (`id_category`)
-            REFERENCES `' . _DB_PREFIX_ . 'ticket_category` (`id_ticket_category`) ON DELETE RESTRICT
+            REFERENCES `' . _DB_PREFIX_ . 'ticket_category` (`id_ticket_category`) ON DELETE RESTRICT,
+        CONSTRAINT `fk_order` FOREIGN KEY (`id_order`)
+            REFERENCES `' . _DB_PREFIX_ . 'orders` (`id_order`) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8;';
 
         return Db::getInstance()->execute($sql);
@@ -252,23 +385,27 @@ final class TicketSystem extends ModuleCore
     private static function createTicketThreadMapTable(): bool
     {
         $sql = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'ticket_thread_map` (
-        `id_ticket` INT(11) UNSIGNED NOT NULL,
-        `id_customer_thread` INT(11) UNSIGNED NOT NULL,
-        PRIMARY KEY (`id_ticket`)
+        `id_ticket` INT UNSIGNED NOT NULL,
+        `id_customer_thread` INT UNSIGNED NOT NULL,
+        PRIMARY KEY (`id_ticket`),
+        UNIQUE KEY `uniq_customer_thread` (`id_customer_thread`)
     ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8;';
 
         return Db::getInstance()->execute($sql);
     }
 
-
-    public function hookDisplayCustomerAccount()
+    private static function createTicketMessageMapTable(): bool
     {
-        return $this->context->smarty->fetch(_PS_MODULE_DIR_.$this->name.'/views/templates/hook/myaccount.tpl');
+        $sql = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'ticket_message_map` (
+        `id_ticket_message` INT NOT NULL,
+        `id_customer_message` INT NOT NULL,
+        `synced_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (`id_ticket_message`),
+        UNIQUE KEY `uniq_customer_message` (`id_customer_message`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;';
+
+        return Db::getInstance()->execute($sql);
     }
-
-
-
-
 
 
 

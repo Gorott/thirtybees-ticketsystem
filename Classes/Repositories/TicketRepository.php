@@ -34,7 +34,7 @@ class TicketRepository
      * @param TicketCategory|null $ticketCategory Category the ticket is in, defaults to Uncategorized
      * @return Ticket|null
      */
-    public function create(string $subject, string $email, ?int $id_customer = null, ?TicketStatus $status = null, ?TicketCategory $category = null, ?Employee $assignee = null): ?Ticket
+    public function create(string $subject, string $email, ?int $order = null, ?int $id_customer = null, ?TicketStatus $status = null, ?TicketCategory $category = null, ?Employee $assignee = null): ?Ticket
     {
 
 
@@ -44,6 +44,7 @@ class TicketRepository
         $ticket->subject = pSQL($subject);
         $ticket->id_customer = $customer?->id;
         $ticket->email = $email;
+        $ticket->id_order = $order;
 
         $ticket->id_status = ($status && Validate::isLoadedObject($status)) ? $status->id : (int) Configuration::get('DEFAULT_TICKET_STATUS');
         $ticket->id_category = ($category && Validate::isLoadedObject($category)) ? $category->id : (int) Configuration::get('DEFAULT_TICKET_CATEGORY');

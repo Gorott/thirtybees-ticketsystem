@@ -10,6 +10,13 @@
                 {$ticket->getCustomer()->firstname} {$ticket->getCustomer()->lastname}
                 <br>
             {/if}
+            {if !is_null($ticket->id_order)}
+                <strong>Order: </strong>
+                <a href="{$link->getAdminLink('AdminOrders')|escape:'html':'UTF-8'}&id_order={$ticket->id_order}&vieworder">
+                    #{$ticket->getOrder()->reference}
+                </a>
+                <br>
+            {/if}
 
             <strong>Email: </strong>
             <a href="mailto:{$ticket->email}">{$ticket->email}</a><br>

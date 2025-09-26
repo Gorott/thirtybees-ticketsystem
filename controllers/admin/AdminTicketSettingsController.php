@@ -55,6 +55,56 @@ class AdminTicketSettingsController extends ModuleAdminController
                     'title' => $this->l('Save'),
                 ]
             ],
+            'imap_settings' => [
+                'title'  => $this->l('IMAP Settings'),
+                'fields' => [
+                    'IMAP_HOST' => [
+                        'title'      => $this->l('IMAP Host'),
+                        'type'       => 'text',
+                        'required'   => true,
+                        'validation' => 'isUrl',
+                        'hint'       => $this->l('Mail server hostname (e.g. imap.gmail.com)'),
+                    ],
+                    'IMAP_PORT' => [
+                        'title'      => $this->l('IMAP Port'),
+                        'type'       => 'text',
+                        'required'   => true,
+                        'validation' => 'isUnsignedInt',
+                        'hint'       => $this->l('Usually 993 for SSL, 143 for non-SSL'),
+                    ],
+                    'IMAP_ENCRYPTION' => [
+                        'title'      => $this->l('Encryption'),
+                        'type'       => 'select',
+                        'list'       => [
+                            ['id_option' => 'ssl', 'name' => 'SSL'],
+                            ['id_option' => 'tls', 'name' => 'TLS'],
+                            ['id_option' => 'none', 'name' => 'None'],
+                        ],
+                        'identifier' => 'id_option',
+                        'hint'       => $this->l('Encryption type for IMAP connection'),
+                    ],
+                    'IMAP_USER' => [
+                        'title'      => $this->l('Username'),
+                        'type'       => 'text',
+                        'required'   => true,
+                        'validation' => 'isString',
+                    ],
+                    'IMAP_PASSWORD' => [
+                        'title'      => $this->l('Password'),
+                        'type'       => 'password',
+                        'required'   => true,
+                        'validation' => 'isString',
+                    ],
+                    'IMAP_FOLDER' => [
+                        'title'      => $this->l('Folder'),
+                        'type'       => 'text',
+                        'required'   => false,
+                        'validation' => 'isString',
+                        'hint'       => $this->l('Mailbox folder to fetch from, usually INBOX'),
+                    ],
+                ],
+                'submit' => ['title' => $this->l('Save')],
+            ],
             'ai_suggestions' => [
                 'title' => $this->l('AI Suggestions'),
                 'fields' => [

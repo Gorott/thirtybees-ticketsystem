@@ -13,11 +13,12 @@ class ticketsystemviewticketModuleFrontController extends ModuleFrontController
         private readonly TicketMessageRepository $ticketMessageRepository,
     ) {
         parent::__construct();
+
+        $this->display_column_left = false;
     }
 
     public function initContent()
     {
-        $this->display_column_left = false;
         parent::initContent();
 
         if (!$this->context->customer->isLogged()) {

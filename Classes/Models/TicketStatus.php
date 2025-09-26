@@ -15,9 +15,21 @@ class TicketStatus extends ObjectModel
         'table' => 'ticket_status',
         'primary' => 'id_ticket_status',
         'fields' => [
-            'name' => ['type' => self::TYPE_STRING, 'validate' => 'isGenericName', 'size' => 32, 'required' => true],
-            'color' => ['type' => self::TYPE_STRING, 'validate' => 'isGenericName', 'size' => 7],
-            'enabled' => ['type' => self::TYPE_BOOL, 'validate' => 'isBool'],
+            'name' => [
+                'type' => self::TYPE_STRING,
+                'validate' => 'isGenericName',
+                'size' => 32,
+                'required' => true
+            ],
+            'color' => [
+                'type' => self::TYPE_STRING,
+                'validate' => 'isGenericName',
+                'size' => 7
+            ],
+            'enabled' => [
+                'type' => self::TYPE_BOOL,
+                'validate' => 'isBool'
+            ],
         ]
     ];
 }

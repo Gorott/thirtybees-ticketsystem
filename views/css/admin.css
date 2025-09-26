@@ -1,0 +1,4 @@
+/* Hide Latest Messages notification + menu entry */
+#customer_message_notif     {
+    display: none !important;
+}

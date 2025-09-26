@@ -99,7 +99,7 @@ class AdminTicketSystemController extends ModuleAdminController
             ]
         ];
 
-
+        $this->processMailbox();
 
         $this->addRowAction('view');
         $this->addRowAction('delete');
@@ -131,6 +131,92 @@ class AdminTicketSystemController extends ModuleAdminController
 
     }
 
+    public function processMailbox()
+    {
+        $host       = Configuration::get('IMAP_HOST');
+        $port       = (int) Configuration::get('IMAP_PORT');
+        $encryption = Configuration::get('IMAP_ENCRYPTION');
+        $user       = Configuration::get('IMAP_USER');
+        $password   = Configuration::get('IMAP_PASSWORD');
+        $folder     = Configuration::get('IMAP_FOLDER') ?: 'INBOX';
+
+        $flags = '/imap';
+
+        if ($encryption === 'ssl') {
+            $flags .= '/ssl';
+        } elseif ($encryption === 'tls') {
+            $flags .= '/tls';
+        }
+
+        $mailboxString = sprintf('{%s:%d%s}%s', $host, $port, $flags, $folder);
+
+        $inbox = @imap_open($mailboxString, $user, $password);
+
+        if (!$inbox) {
+            // instead of throw, add to error stack
+            $this->errors[] = $this->l('IMAP connection failed: ') . imap_last_error();
+            return;
+        }
+
+        $status = imap_status($inbox, $mailboxString, SA_UNSEEN);
+
+        if ($status === false) {
+            $this->errors[] = $this->l('IMAP status failed: ') . imap_last_error();
+            imap_close($inbox);
+            return;
+        }
+
+        if ($status->unseen == 0) {
+            imap_close($inbox);
+            return;
+        }
+
+        $emails = imap_search($inbox, 'UNSEEN');
+        if ($emails === false) {
+            $this->errors[] = $this->l('IMAP search failed: ') . imap_last_error();
+            imap_close($inbox);
+            return;
+        }
+
+
+        foreach ($emails as $email_number) {
+            $overview = imap_fetch_overview($inbox, $email_number, 0)[0];
+            $message  = imap_fetchbody($inbox, $email_number, 1.1);
+
+            if (empty($message)) {
+                $message = imap_fetchbody($inbox, $email_number, 1);
+            }
+
+            $from = $overview->from;
+            $subject = $overview->subject;
+
+
+            $addresses = imap_rfc822_parse_adrlist($from, 'default.com');
+
+            $emailAddress = null;
+            if ($addresses && isset($addresses[0]->mailbox, $addresses[0]->host)) {
+                $emailAddress = $addresses[0]->mailbox . '@' . $addresses[0]->host;
+            }
+
+            if (!$emailAddress || !filter_var($emailAddress, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+
+
+
+
+            try {
+                $ticket = $this->ticketRepository->create($subject, $emailAddress);
+                $this->ticketMessageRepository->create($ticket, $message, MessageAuthor::CUSTOMER, $emailAddress);
+            } catch (\Exception $e) {
+                $this->errors[] = $this->l('Ticket creation failed: ') . $e->getMessage();
+            }
+
+            imap_setflag_full($inbox, $email_number, "\\Seen");
+        }
+
+        imap_close($inbox);
+    }
 
     public function renderView()
     {

@@ -1,3 +1,5 @@
+{hook h='displayHeader'}
+
 <h1>My Tickets</h1>
 
 {if $tickets && count($tickets) > 0}

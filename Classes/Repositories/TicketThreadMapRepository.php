@@ -10,12 +10,26 @@ use Validate;
 
 class TicketThreadMapRepository
 {
-    public function create(Ticket $ticket, CustomerThread $customerThread) {
+    public function create(Ticket $ticket, CustomerThread $customerThread): TicketThreadMap
+    {
+        $existing = $this->findByTicketId($ticket->id);
+        if ($existing) {
+            return $existing;
+        }
+
+        $existing = $this->findByCustomerThreadId($customerThread->id);
+        if ($existing) {
+            return $existing;
+        }
+
         $map = new TicketThreadMap();
-        $map->id_ticket = $ticket->id;
-        $map->id_customer_thread = $customerThread->id;
+        $map->id_ticket = (int) $ticket->id;
+        $map->id_customer_thread = (int) $customerThread->id;
         $map->add();
+
+        return $map;
     }
+
     public function findByTicketId($ticketId) {
         $ticketThreadMap = new TicketThreadMap($ticketId);
         return Validate::isLoadedObject($ticketThreadMap) ? $ticketThreadMap : null;
@@ -23,7 +37,7 @@ class TicketThreadMapRepository
 
     public function findByCustomerThreadId($customerThreadId) {
         $row = Db::getInstance()->getRow('
-        SELECT * FROM `'._DB_PREFIX_.'tb_ticket_thread_map`
+        SELECT * FROM `'._DB_PREFIX_.'ticket_thread_map`
         WHERE id_customer_thread = '.(int)$customerThreadId
         );
 
