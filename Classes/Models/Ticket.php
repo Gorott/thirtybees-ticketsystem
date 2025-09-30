@@ -6,7 +6,6 @@ use Customer;
 use Employee;
 use ObjectModel;
 use Order;
-use PHPUnit\Event\EventAlreadyAssignedException;
 use TicketSystem\Repositories\CustomerRepository;
 use TicketSystem\Repositories\TicketStatusRepository;
 use Validate;
@@ -18,6 +17,7 @@ class Ticket extends ObjectModel
     private static ?TicketStatusRepository $ticketStatusRepository = null;
     public $id_ticket;
     public $id_customer;
+    public $id_ticket_contact;
     public $email;
     public $id_assignee;
     public $subject;
@@ -36,6 +36,12 @@ class Ticket extends ObjectModel
                 'required' => true
             ],
             'id_customer' => [
+                'type' => self::TYPE_INT,
+                'validate' => 'isUnsignedId',
+                'required' => false,
+                'allow_null' => true
+            ],
+            'id_ticket_contact' => [
                 'type' => self::TYPE_INT,
                 'validate' => 'isUnsignedId',
                 'required' => false,
@@ -109,6 +115,13 @@ class Ticket extends ObjectModel
         $order = new Order($this->id_order);
 
         return Validate::isLoadedObject($order) ? $order : null;
+    }
+
+    public function getContact(): ?TicketContact
+    {
+        $contact = new TicketContact($this->id_ticket_contact);
+
+        return Validate::isLoadedObject($contact) ? $contact : null;
     }
 
     public static function formatValue($value, $type, $withQuotes = true, $purify = false, $allowNull = false)

@@ -11,6 +11,7 @@ use PrestaShopDatabaseException;
 use PrestaShopException;
 use TicketSystem\Models\Ticket;
 use TicketSystem\Models\TicketCategory;
+use TicketSystem\Models\TicketContact;
 use TicketSystem\Models\TicketStatus;
 use TicketSystem\Services\CustomerResolver;
 use Validate;
@@ -34,7 +35,7 @@ class TicketRepository
      * @param TicketCategory|null $ticketCategory Category the ticket is in, defaults to Uncategorized
      * @return Ticket|null
      */
-    public function create(string $subject, string $email, ?int $order = null, ?int $id_customer = null, ?TicketStatus $status = null, ?TicketCategory $category = null, ?Employee $assignee = null): ?Ticket
+    public function create(string $subject, string $email, ?int $id_contact, ?int $order = null, ?int $id_customer = null, ?TicketStatus $status = null, ?Employee $assignee = null): ?Ticket
     {
 
 
@@ -46,8 +47,13 @@ class TicketRepository
         $ticket->email = $email;
         $ticket->id_order = $order;
 
+        $ticketContact = new TicketContact($id_contact);
+        if (Validate::isLoadedObject($ticketContact)) {
+            $ticket->id_ticket_contact = $id_contact;
+        }
+
         $ticket->id_status = ($status && Validate::isLoadedObject($status)) ? $status->id : (int) Configuration::get('DEFAULT_TICKET_STATUS');
-        $ticket->id_category = ($category && Validate::isLoadedObject($category)) ? $category->id : (int) Configuration::get('DEFAULT_TICKET_CATEGORY');
+        $ticket->id_category = Validate::isLoadedObject($ticketContact) ? $ticketContact->getCategory()->id_ticket_category  : (int) Configuration::get('DEFAULT_TICKET_CATEGORY');
 
 
         $ticket->created_at = (new DateTime())->format('Y-m-d H:i:s');

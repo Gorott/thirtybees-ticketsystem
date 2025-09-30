@@ -50,6 +50,7 @@ class AdminTicketSettingsController extends ModuleAdminController
                         'identifier' => 'id_option',
                         'hint' => $this->l('Default Category for new tickets (modifiable when creating a ticket)'),
                     ],
+
                 ],
                 'submit' => [
                     'title' => $this->l('Save'),
@@ -148,26 +149,31 @@ class AdminTicketSettingsController extends ModuleAdminController
         $this->addJS(_PS_MODULE_DIR_ . $this->module->name . '/views/js/status_preview.js');
     }
 
-    public function getOptionFieldsValues($tab = null)
+    public function processUpdateOptions()
     {
-        $values = parent::getOptionFieldsValues($tab);
 
-        // Mask API key if already stored
-        $storedKey = Configuration::get('OPEN_ROUTER_API_KEY');
-        if (!empty($storedKey)) {
-            $values['OPEN_ROUTER_API_KEY'] = '********';
+        $values = $_POST;
+
+        if (array_key_exists('IMAP_PASSWORD', $values) && $values['IMAP_PASSWORD'] === '') {
+            unset($values['IMAP_PASSWORD']);
         }
 
-        return $values;
-    }
-
-    public function postProcess()
-    {
-        // Don’t overwrite the API key with ********
-        if (Tools::getValue('OPEN_ROUTER_API_KEY') === '********') {
-            $_POST['OPEN_ROUTER_API_KEY'] = Configuration::get('OPEN_ROUTER_API_KEY');
+        if (array_key_exists('OPEN_ROUTER_API_KEY', $values) && $values['OPEN_ROUTER_API_KEY'] === '') {
+            unset($values['OPEN_ROUTER_API_KEY']);
         }
 
-        parent::postProcess();
+
+        foreach ($this->fields_options as $data) {
+            if (isset($data['fields'])) {
+                foreach ($data['fields'] as $field => $options) {
+                    if (isset($values[$field])) {
+                        Configuration::updateValue($field, $values[$field]);
+                    }
+                }
+            }
+        }
     }
+
+
+
 }

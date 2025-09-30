@@ -4,9 +4,10 @@
       "TicketSystem\\": "Classes/"
     }
   },
-  "config": {
-    "platform": {
-      "php": "8.2"
-    }
+  "require": {
+    "symfony/dependency-injection": "^5.4 || ^6.0",
+    "symfony/config": "^5.4 || ^6.0",
+    "symfony/yaml": "^5.4 || ^6.0",
+    "psr/container": "^1.1 || ^2.0"
   }
 }

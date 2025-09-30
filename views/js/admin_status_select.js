@@ -36,8 +36,7 @@ $(document).on('change', '.ticket-status-select', function() {
         },
         success: function (response) {
             if (response.success) {
-                $label.text(response.new_status)
-                    .css('background-color', response.color);
+                location.reload()
             } else {
                 alert(response.message)
             }

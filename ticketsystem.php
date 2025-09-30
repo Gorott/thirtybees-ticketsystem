@@ -1,12 +1,14 @@
 <?php
 
 
-use TicketSystem\Enums\MessageAuthor;
+use Psr\Container\ContainerInterface;
+use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Dumper\PhpDumper;
+use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
 use TicketSystem\Models\Ticket;
 use TicketSystem\Repositories\TicketCategoryRepository;
-use TicketSystem\Repositories\TicketMessageRepository;
 use TicketSystem\Repositories\TicketStatusRepository;
-use TicketSystem\Services\TicketService;
 use TicketSystem\Services\TicketSyncHelper;
 
 if (!defined('_TB_VERSION_')) {
@@ -17,6 +19,9 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 final class TicketSystem extends ModuleCore
 {
+
+    public const MODULE_NAME = 'ticketsystem';
+    private static ContainerInterface $container;
 
     public function __construct(private readonly TicketStatusRepository $ticketStatusRepository, private readonly TicketCategoryRepository $ticketCategoryRepository, private readonly TicketSyncHelper $ticketSyncHelper)
     {
@@ -38,11 +43,49 @@ final class TicketSystem extends ModuleCore
         $this->displayName = 'Ticket System Module';
         $this->description = 'This module adds handling of Ticket system module and replaces the Customer service core';
 
+        $this->buildContainer();
+
+    }
+
+
+    private function buildContainer(): void
+    {
+        $cacheFile = _PS_CACHE_DIR_ . 'ticketsystem_container.php';
+        $fresh = !is_file($cacheFile) || _PS_MODE_DEV_;
+
+        if (!$fresh) {
+            require_once $cacheFile;
+            self::$container = new ProjectServiceContainer();
+        }
+
+        $container = new ContainerBuilder();
+        $context = Context::getContext();
+
+        $container->set(Smarty::class, $context->smarty);
+        $container->set(Context::class, $context);
+        $context->smarty->addPluginsDir(_PS_MODULE_DIR_ . $this->name . '/smarty/plugins/');
+
+        $loader = new YamlFileLoader($container, new FileLocator(__DIR__ . '/config'));
+        $loader->load('services.yml');
+        $container->compile();
+
+        $dumper = new PhpDumper($container);
+        file_put_contents($cacheFile, $dumper->dump([
+            'class' => 'ProjectServiceContainer'
+        ]));
+
+        require_once $cacheFile;
+        self::$container = new ProjectServiceContainer;
+    }
+
+    public static function getContainer(): ContainerInterface
+    {
+        return self::$container;
     }
 
     public function install(): bool
     {
-        if (!parent::install() || !self::createTicketStatusTable() || !self::createTicketCategoryTable() || !self::createTicketTable() || !self::createTicketMessageTable() || !self::createTicketThreadMapTable() || !self::createTicketMessageMapTable()) {
+        if (!parent::install() || !self::createTicketStatusTable() || !self::createTicketCategoryTable() || !self::createTicketContactTable() || !self::createTicketTable() || !self::createTicketMessageTable() || !self::createTicketThreadMapTable() || !self::createTicketMessageMapTable()) {
             return false;
         }
 
@@ -111,6 +154,14 @@ final class TicketSystem extends ModuleCore
                 $createTicketTab->id_parent = $ticketSystemTab->id;
                 $createTicketTab->save();
             }
+        }
+
+        $id_tab = Tab::getIdFromClassName('AdminContacts');
+        if ($id_tab) {
+            $tab = new Tab($id_tab);
+            $tab->module = $this->name;
+            $tab->class_name = 'AdminTicketContacts';
+            $tab->save();
         }
 
         $id_tab = (int) Tab::getIdFromClassName('AdminTicketSuggest');
@@ -198,6 +249,14 @@ final class TicketSystem extends ModuleCore
             }
 
             $tab->add();
+        }
+
+        $id_tab = Tab::getIdFromClassName('AdminTicketContacts');
+        if ($id_tab) {
+            $tab = new Tab($id_tab);
+            $tab->module = null;
+            $tab->class_name = 'AdminContacts';
+            $tab->save();
         }
 
         return true;
@@ -308,6 +367,7 @@ final class TicketSystem extends ModuleCore
         $sql = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'ticket` (
         `id_ticket` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
         `id_customer` INT(11) UNSIGNED DEFAULT NULL,
+        `id_ticket_contact` INT(11) UNSIGNED DEFAULT NULL,
         `email` VARCHAR(255) NOT NULL,
         `subject` VARCHAR(255) NOT NULL,
         `id_status` INT(11) UNSIGNED NOT NULL,
@@ -315,15 +375,18 @@ final class TicketSystem extends ModuleCore
         `id_order` INT(11) UNSIGNED DEFAULT NULL,
         `id_assignee` INT(11) UNSIGNED DEFAULT NULL,
         `last_updated` DATETIME NOT NULL,
-                `created_at` DATETIME NOT NULL,
+        `created_at` DATETIME NOT NULL,
         PRIMARY KEY (`id_ticket`),
         KEY `id_customer` (`id_customer`),
+        KEY `id_ticket_contact` (`id_ticket_contact`),
         KEY `id_status` (`id_status`),
         KEY `id_category` (`id_category`),
         KEY `id_assignee` (`id_assignee`),
         KEY `id_order` (`id_order`),
         CONSTRAINT `fk_ticket_customer` FOREIGN KEY (`id_customer`)
             REFERENCES `' . _DB_PREFIX_ . 'customer` (`id_customer`) ON DELETE CASCADE,
+        CONSTRAINT `fk_ticket_contact` FOREIGN KEY (`id_ticket_contact`)
+            REFERENCES `' . _DB_PREFIX_ . 'ticket_contact` (`id_ticket_contact`) ON DELETE SET NULL,
         CONSTRAINT `fk_ticket_assignee` FOREIGN KEY (`id_assignee`)
             REFERENCES `' . _DB_PREFIX_ . 'employee` (`id_employee`) ON DELETE SET NULL,
         CONSTRAINT `fk_ticket_status` FOREIGN KEY (`id_status`)
@@ -350,7 +413,10 @@ final class TicketSystem extends ModuleCore
         `created_at` DATETIME NOT NULL,
         PRIMARY KEY (`id_ticket_message`),
         KEY `id_ticket` (`id_ticket`),
-        KEY `author_lookup` (`author_type`, `author_id`)
+        KEY `author_lookup` (`author_type`, `author_id`),
+        CONSTRAINT `fk_ticket_message_ticket` FOREIGN KEY (`id_ticket`)
+        REFERENCES `' . _DB_PREFIX_ . 'ticket` (`id_ticket`) ON DELETE CASCADE
+
     ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8;';
 
         return Db::getInstance()->execute($sql);
@@ -371,7 +437,7 @@ final class TicketSystem extends ModuleCore
 
     private static function createTicketCategoryTable(): bool
     {
-        $sql = 'CREATE TABLE IF NOT EXISTS`' . _DB_PREFIX_ . 'ticket_category` (
+        $sql = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'ticket_category` (
         `id_ticket_category` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
         `name` VARCHAR(64) NOT NULL,
         `description` TEXT NOT NULL,
@@ -402,7 +468,25 @@ final class TicketSystem extends ModuleCore
         `synced_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (`id_ticket_message`),
         UNIQUE KEY `uniq_customer_message` (`id_customer_message`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;';
+        ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8;';
+
+        return Db::getInstance()->execute($sql);
+    }
+
+    private static function createTicketContactTable(): bool
+    {
+        $sql = 'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'ticket_contact` (
+        `id_ticket_contact` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        `id_category` INT UNSIGNED NOT NULL,
+        `email` VARCHAR(255) NOT NULL,
+        PRIMARY KEY (`id_ticket_contact`),
+        UNIQUE KEY `uniq_category` (`id_category`),
+        KEY `idx_ticket_contact_email` (`email`),
+        CONSTRAINT `fk_ticket_contact_category`
+            FOREIGN KEY (`id_category`)
+            REFERENCES `' . _DB_PREFIX_ . 'ticket_category` (`id_ticket_category`)
+            ON DELETE CASCADE
+    ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8;';
 
         return Db::getInstance()->execute($sql);
     }

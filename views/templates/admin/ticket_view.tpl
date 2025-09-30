@@ -2,7 +2,16 @@
     <!-- LEFT SIDEBAR -->
     <div class="col-md-3">
         <div class="panel">
-            <div class="panel-heading"><strong>Ticket Details</strong></div>
+            <div class="panel-heading">
+                <strong>Ticket Details</strong>
+                <a href="#editTicketModal"
+                   class="pull-right"
+                   data-toggle="modal"
+                   data-ticket-id="{$ticket->id_ticket}"
+                   title="Edit Ticket">
+                    <i class="icon-cogs"></i>
+                </a>
+            </div>
 
             <strong>Ticket ID: </strong> #{$ticket->id_ticket}<br>
             {if !is_null($ticket->id_customer)}
@@ -144,6 +153,36 @@
     </div>
 </div>
 
+<div class="modal fade" id="editTicketModal" tabindex="-1" role="dialog" aria-labelledby="editTicketLabel">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="editTicketLabel">Edit Ticket #{$ticket->id_ticket}</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">×</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="edit-ticket-form">
+                    <div class="form-group">
+                        <label for="ticketEmail">Email</label>
+                        <input type="email" class="form-control" id="ticketEmail" name="email" value="{$ticket->email}">
+                    </div>
+                    <div class="form-group">
+                        <label for="ticketAssignee">Assignee</label>
+                        <input type="text" class="form-control" id="ticketAssignee" name="assignee" value="{$ticket->getAssignee()->firstname} {$ticket->getAssignee()->lastname}">
+                    </div>
+                    <!-- add other fields you need here -->
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveTicketBtn">Save changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
     .label {
         margin-right: 8px;
@@ -242,5 +281,24 @@
         font-weight: bold;
         margin-bottom: 4px;
         color: #666;
+    }
+
+    .panel-heading {
+        position: relative;
+    }
+
+    .panel-heading a {
+        position: absolute;
+        right: 10px;        /* distance from right edge */
+        top: 50%;
+        transform: translateY(-50%); /* vertical centering */
+        color: #333;
+        text-decoration: none;
+    }
+
+
+
+    .panel-heading a:hover {
+        color: #000;
     }
 </style>

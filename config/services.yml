@@ -1,0 +1,17 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+    public: true
+
+  # only register code inside Repositories and Services
+  TicketSystem\Repositories\:
+    resource: '../Classes/Repositories/*'
+
+  TicketSystem\Services\:
+    resource: '../Classes/Services/*'
+
+  Smarty:
+    synthetic: true
+  Context:
+    synthetic: true

@@ -1,29 +1,28 @@
 <?php
 
-
-use TicketSystem\Enums\MessageAuthor;
 use TicketSystem\Models\Ticket;
 use TicketSystem\Repositories\EmployeeRepository;
 use TicketSystem\Repositories\TicketMessageRepository;
-use TicketSystem\Repositories\TicketRepository;
 use TicketSystem\Repositories\TicketStatusRepository;
+use TicketSystem\Services\ImapMailProcessor;
+use TicketSystem\Services\TicketReplyHandler;
 use TicketSystem\Services\TicketService;
 
 if (!defined('_TB_VERSION_')) {
     exit;
 }
 
-require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 
 class AdminTicketSystemController extends ModuleAdminController
 {
 
     public function __construct(
+        private readonly TicketService $ticketService,
+        private readonly ImapMailProcessor $mailProcessor,
         private readonly TicketMessageRepository $ticketMessageRepository,
         private readonly TicketStatusRepository $ticketStatusRepository,
-        private readonly TicketRepository $ticketRepository,
-        private readonly TicketService $ticketService,
         private readonly EmployeeRepository $employeeRepository,
+        private readonly TicketReplyHandler $ticketReplyHandler,
     )
     {
         $this->bootstrap = true;
@@ -99,8 +98,7 @@ class AdminTicketSystemController extends ModuleAdminController
             ]
         ];
 
-        $this->processMailbox();
-
+        $this->errors = array_merge($this->errors, $this->mailProcessor->process());
         $this->addRowAction('view');
         $this->addRowAction('delete');
     }
@@ -131,118 +129,25 @@ class AdminTicketSystemController extends ModuleAdminController
 
     }
 
-    public function processMailbox()
-    {
-        $host       = Configuration::get('IMAP_HOST');
-        $port       = (int) Configuration::get('IMAP_PORT');
-        $encryption = Configuration::get('IMAP_ENCRYPTION');
-        $user       = Configuration::get('IMAP_USER');
-        $password   = Configuration::get('IMAP_PASSWORD');
-        $folder     = Configuration::get('IMAP_FOLDER') ?: 'INBOX';
-
-        $flags = '/imap';
-
-        if ($encryption === 'ssl') {
-            $flags .= '/ssl';
-        } elseif ($encryption === 'tls') {
-            $flags .= '/tls';
-        }
-
-        $mailboxString = sprintf('{%s:%d%s}%s', $host, $port, $flags, $folder);
-
-        $inbox = @imap_open($mailboxString, $user, $password);
-
-        if (!$inbox) {
-            // instead of throw, add to error stack
-            $this->errors[] = $this->l('IMAP connection failed: ') . imap_last_error();
-            return;
-        }
-
-        $status = imap_status($inbox, $mailboxString, SA_UNSEEN);
-
-        if ($status === false) {
-            $this->errors[] = $this->l('IMAP status failed: ') . imap_last_error();
-            imap_close($inbox);
-            return;
-        }
-
-        if ($status->unseen == 0) {
-            imap_close($inbox);
-            return;
-        }
-
-        $emails = imap_search($inbox, 'UNSEEN');
-        if ($emails === false) {
-            $this->errors[] = $this->l('IMAP search failed: ') . imap_last_error();
-            imap_close($inbox);
-            return;
-        }
-
-
-        foreach ($emails as $email_number) {
-            $overview = imap_fetch_overview($inbox, $email_number, 0)[0];
-            $message  = imap_fetchbody($inbox, $email_number, 1.1);
-
-            if (empty($message)) {
-                $message = imap_fetchbody($inbox, $email_number, 1);
-            }
-
-            $from = $overview->from;
-            $subject = $overview->subject;
-
-
-            $addresses = imap_rfc822_parse_adrlist($from, 'default.com');
-
-            $emailAddress = null;
-            if ($addresses && isset($addresses[0]->mailbox, $addresses[0]->host)) {
-                $emailAddress = $addresses[0]->mailbox . '@' . $addresses[0]->host;
-            }
-
-            if (!$emailAddress || !filter_var($emailAddress, FILTER_VALIDATE_EMAIL)) {
-                continue;
-            }
-
-
-
-
-            try {
-                $ticket = $this->ticketRepository->create($subject, $emailAddress);
-                $this->ticketMessageRepository->create($ticket, $message, MessageAuthor::CUSTOMER, $emailAddress);
-            } catch (\Exception $e) {
-                $this->errors[] = $this->l('Ticket creation failed: ') . $e->getMessage();
-            }
-
-            imap_setflag_full($inbox, $email_number, "\\Seen");
-        }
-
-        imap_close($inbox);
-    }
-
     public function renderView()
     {
-        $id = (int)Tools::getValue($this->identifier);
-        $ticket = new Ticket($id);
-
-        $messages = $this->ticketMessageRepository->findAllByTicketId($ticket->id);
-        $statuses = $this->ticketStatusRepository->findAll();
-        $employees = $this->employeeRepository->findAll();
+        $ticket = new Ticket(Tools::getValue('id_ticket'));
 
         if (!Validate::isLoadedObject($ticket)) {
-            return $this->displayWarning($this->l('Ticket not found'));
+            return $this->errors[] = $this->l('Ticket not found');
         }
 
-
-
         $tpl = $this->context->smarty->createTemplate(
-            _PS_MODULE_DIR_.$this->module->name.'/views/templates/admin/ticket_view.tpl'
+            _PS_MODULE_DIR_ . TicketSystem::MODULE_NAME . '/views/templates/admin/ticket_view.tpl'
         );
 
         $tpl->assign([
             'ticket' => $ticket,
-            'messages' => $messages,
-            'statuses' => $statuses,
-            'employees' => $employees
+            'messages' => $this->ticketMessageRepository->findAllByTicketId($ticket->id_ticket),
+            'statuses' => $this->ticketStatusRepository->findAll(),
+            'employees' => $this->employeeRepository->findAll(),
         ]);
+
 
         return $tpl->fetch();
     }
@@ -277,29 +182,15 @@ class AdminTicketSystemController extends ModuleAdminController
         $ticketId = (int) Tools::getValue('id_ticket');
         $message = Tools::getValue('message');
 
-        if (!$ticketId) {
-
-        }
-
-        $ticket = $this->ticketRepository->findById($ticketId);
-        if (!$ticket) {
-        }
-        if ($ticketId && !empty($message)) {
-            $this->ticketMessageRepository->create($ticket, $message, MessageAuthor::EMPLOYEE, $this->context->employee->email);
-
-            $ticket->last_updated = date('Y-m-d H:i:s');
-            if ($ticket->id_assignee == null) {
-                $ticket->id_assignee = $this->context->employee->id;
-            }
-            $ticket->update();
+        if ($this->ticketReplyHandler->handle($ticketId, $message, $this->context->employee)) {
             Tools::redirectAdmin(
                 $this->context->link->getAdminLink('AdminTicketSystem', true, [
                     'id_ticket' => $ticketId,
-                    'viewticket' => 1,
-                ])
+                    'viewTicket' => 1,
+                ]),
             );
         } else {
-            $this->errors[] = "Message was not sent";
+            $this->errors[] = $this->l('There was an error processing your message.');
         }
     }
 
@@ -333,49 +224,28 @@ class AdminTicketSystemController extends ModuleAdminController
 
     public function ajaxProcessAssignToEmployee()
     {
-        $id_ticket = (int) Tools::getValue('id_ticket');
-        $id_employee = (int) Tools::getValue('id_employee');
+        $idTicket = Tools::getValue('id_ticket');
+        $idEmployee = Tools::getValue('id_mployee') !== null
+            ? (int)Tools::getValue('id_employee')
+            : (int)$this->context->employee->id;
 
-        $id_employee = $id_employee !== null ? (int)$id_employee : (int)$this->context->employee->id;
-
-        // support unassign
-        if ($id_employee === -1) {
-            $id_employee = null;
-        }
-        $ticket = new Ticket($id_ticket);
-
-        if (!$this->ticketService->assignToEmployee($ticket, $id_employee)) {
-            die(json_encode([
-                'success' => false,
-                'error'   => $this->l('Could not assign ticket'),
-            ]));
+        if ($idEmployee === -1) {
+            $idEmployee = null;
         }
 
-        die(json_encode(['success' => true]));
+        die(json_encode(
+            $this->ticketService->assignToEmployee($idTicket, $idEmployee)
+        ));
     }
 
 
     public function ajaxProcessUpdateTicketStatus()
     {
-        $idTicket = (int) Tools::getValue('id_ticket');
-        $idStatus = (int) Tools::getValue('id_status');
+        $idTicket = Tools::getValue('id_ticket');
+        $idStatus = Tools::getValue('id_status');
 
-        $ticket = new Ticket($idTicket);
-        $status = $this->ticketService->updateStatus($ticket, $idStatus);
-
-        if ($status === null) {
-            die(json_encode([
-                'success' => false,
-                'message' => $this->l('Failed to update ticket status'),
-            ]));
-        }
-
-        die(json_encode([
-            'success'    => true,
-            'new_status' => $status->name,
-            'color'      => $status->color,
-            'id_status'  => $status->id,
-            'id_ticket'  => $ticket->id,
-        ]));
+        die(json_encode(
+            $this->ticketService->updateStatus($idTicket, $idStatus)
+        ));
     }
 }
